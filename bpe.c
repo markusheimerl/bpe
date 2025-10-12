@@ -13,6 +13,10 @@ typedef struct {
     uint32_t size;
 } HashTable;
 
+// ============================================================================
+// Hash Table Implementation
+// ============================================================================
+
 static HashTable* hash_create() {
     HashTable* ht = malloc(sizeof(HashTable));
     ht->size = HASH_SIZE;
@@ -109,42 +113,53 @@ static uint32_t merge_pair(uint32_t* tokens, uint32_t num_tokens,
     return write_idx;
 }
 
-BPETokenizer* bpe_create() {
-    BPETokenizer* tokenizer = malloc(sizeof(BPETokenizer));
-    tokenizer->vocab_size = INITIAL_VOCAB_SIZE;
-    tokenizer->num_merges = 0;
-    tokenizer->merges = malloc(MAX_VOCAB_SIZE * sizeof(Merge));
-    tokenizer->vocab = malloc(MAX_VOCAB_SIZE * sizeof(char*));
-    tokenizer->vocab_lens = malloc(MAX_VOCAB_SIZE * sizeof(uint32_t));
+// ============================================================================
+// BPE Core Functions
+// ============================================================================
+
+BPE* init_bpe(uint32_t target_vocab_size) {
+    BPE* bpe = malloc(sizeof(BPE));
     
+    bpe->vocab_size = INITIAL_VOCAB_SIZE;
+    bpe->num_merges = 0;
+    bpe->target_vocab_size = target_vocab_size;
+    bpe->training_step = 0;
+    
+    bpe->merges = malloc(MAX_VOCAB_SIZE * sizeof(Merge));
+    bpe->vocab = malloc(MAX_VOCAB_SIZE * sizeof(char*));
+    bpe->vocab_lens = malloc(MAX_VOCAB_SIZE * sizeof(uint32_t));
+    
+    // Initialize base vocabulary (all bytes)
     for (uint32_t i = 0; i < INITIAL_VOCAB_SIZE; i++) {
-        tokenizer->vocab[i] = malloc(2);
-        tokenizer->vocab[i][0] = (char)i;
-        tokenizer->vocab[i][1] = '\0';
-        tokenizer->vocab_lens[i] = 1;
+        bpe->vocab[i] = malloc(2);
+        bpe->vocab[i][0] = (char)i;
+        bpe->vocab[i][1] = '\0';
+        bpe->vocab_lens[i] = 1;
     }
     
-    return tokenizer;
+    return bpe;
 }
 
-void bpe_free(BPETokenizer* tokenizer) {
-    if (!tokenizer) return;
+void free_bpe(BPE* bpe) {
+    if (!bpe) return;
     
-    for (uint32_t i = 0; i < tokenizer->vocab_size; i++) {
-        free(tokenizer->vocab[i]);
+    for (uint32_t i = 0; i < bpe->vocab_size; i++) {
+        free(bpe->vocab[i]);
     }
-    free(tokenizer->vocab);
-    free(tokenizer->vocab_lens);
-    free(tokenizer->merges);
-    free(tokenizer);
+    free(bpe->vocab);
+    free(bpe->vocab_lens);
+    free(bpe->merges);
+    free(bpe);
 }
 
-void bpe_train(BPETokenizer* tokenizer, const char* corpus, size_t corpus_size, uint32_t num_merges) {
+void train_bpe(BPE* bpe, const char* corpus, size_t corpus_size) {
     printf("\n=== Training BPE Tokenizer ===\n");
     printf("Corpus size: %zu bytes\n", corpus_size);
-    printf("Target merges: %u\n", num_merges);
-    printf("Initial vocab size: %u\n\n", tokenizer->vocab_size);
+    printf("Initial vocab size: %u\n", bpe->vocab_size);
+    printf("Target vocab size: %u\n", bpe->target_vocab_size);
+    printf("Merges to perform: %u\n\n", bpe->target_vocab_size - INITIAL_VOCAB_SIZE);
     
+    // Initialize token sequence
     uint32_t* tokens = malloc(corpus_size * sizeof(uint32_t));
     uint32_t num_tokens = corpus_size;
     
@@ -152,60 +167,79 @@ void bpe_train(BPETokenizer* tokenizer, const char* corpus, size_t corpus_size, 
         tokens[i] = (unsigned char)corpus[i];
     }
     
+    uint32_t num_merges = bpe->target_vocab_size - INITIAL_VOCAB_SIZE;
+    
     for (uint32_t merge_idx = 0; merge_idx < num_merges; merge_idx++) {
+        // Count all pairs
         HashTable* ht = hash_create();
         count_pairs(tokens, num_tokens, ht);
         
+        // Find most frequent pair
         uint32_t max_count;
         uint64_t best_pair = find_most_frequent_pair(ht, &max_count);
         hash_free(ht);
         
         if (max_count == 0) {
-            printf("No more pairs to merge at iteration %u\n", merge_idx);
+            printf("No more pairs to merge at step %u\n", merge_idx);
             break;
         }
         
         uint32_t token1 = (uint32_t)(best_pair >> 32);
         uint32_t token2 = (uint32_t)(best_pair & 0xFFFFFFFF);
-        uint32_t new_token = tokenizer->vocab_size;
+        uint32_t new_token = bpe->vocab_size;
         
-        tokenizer->merges[tokenizer->num_merges].token1 = token1;
-        tokenizer->merges[tokenizer->num_merges].token2 = token2;
-        tokenizer->num_merges++;
+        // Record merge rule
+        bpe->merges[bpe->num_merges].token1 = token1;
+        bpe->merges[bpe->num_merges].token2 = token2;
+        bpe->num_merges++;
         
-        uint32_t new_len = tokenizer->vocab_lens[token1] + tokenizer->vocab_lens[token2];
-        tokenizer->vocab[new_token] = malloc(new_len + 1);
-        memcpy(tokenizer->vocab[new_token], tokenizer->vocab[token1], tokenizer->vocab_lens[token1]);
-        memcpy(tokenizer->vocab[new_token] + tokenizer->vocab_lens[token1], 
-               tokenizer->vocab[token2], tokenizer->vocab_lens[token2]);
-        tokenizer->vocab[new_token][new_len] = '\0';
-        tokenizer->vocab_lens[new_token] = new_len;
-        tokenizer->vocab_size++;
+        // Create new vocabulary entry
+        uint32_t new_len = bpe->vocab_lens[token1] + bpe->vocab_lens[token2];
+        bpe->vocab[new_token] = malloc(new_len + 1);
+        memcpy(bpe->vocab[new_token], bpe->vocab[token1], bpe->vocab_lens[token1]);
+        memcpy(bpe->vocab[new_token] + bpe->vocab_lens[token1], 
+               bpe->vocab[token2], bpe->vocab_lens[token2]);
+        bpe->vocab[new_token][new_len] = '\0';
+        bpe->vocab_lens[new_token] = new_len;
+        bpe->vocab_size++;
         
+        // Apply merge
         num_tokens = merge_pair(tokens, num_tokens, token1, token2, new_token);
         
+        bpe->training_step++;
+        
+        // Print progress
         if ((merge_idx + 1) % 100 == 0 || merge_idx < 10 || merge_idx == num_merges - 1) {
-            printf("Merge %4u: (%5u, %5u) -> %5u | count: %6u | tokens: %6u\n", 
-                   merge_idx + 1, token1, token2, new_token, max_count, num_tokens);
+            printf("Step [%4u/%4u]: (%5u, %5u) -> %5u | count: %6u | tokens: %6u\n", 
+                   merge_idx + 1, num_merges, token1, token2, new_token, max_count, num_tokens);
         }
     }
     
     free(tokens);
+    
     printf("\nTraining complete!\n");
-    printf("Final vocabulary size: %u\n", tokenizer->vocab_size);
+    printf("Final vocabulary size: %u\n", bpe->vocab_size);
+    printf("Total merge rules: %u\n", bpe->num_merges);
 }
 
-uint32_t* bpe_encode(BPETokenizer* tokenizer, const char* text, size_t text_len, uint32_t* num_tokens) {
+uint32_t* encode_bpe(BPE* bpe, const char* text, size_t text_len, uint32_t* num_tokens) {
+    if (text_len == 0) {
+        *num_tokens = 0;
+        return NULL;
+    }
+    
     uint32_t* tokens = malloc(text_len * sizeof(uint32_t));
     *num_tokens = text_len;
     
+    // Initialize with byte tokens
     for (size_t i = 0; i < text_len; i++) {
         tokens[i] = (unsigned char)text[i];
     }
     
-    for (uint32_t i = 0; i < tokenizer->num_merges; i++) {
-        uint32_t token1 = tokenizer->merges[i].token1;
-        uint32_t token2 = tokenizer->merges[i].token2;
+    // Apply all merge rules in order
+    for (uint32_t i = 0; i < bpe->num_merges; i++) {
+        uint32_t token1 = bpe->merges[i].token1;
+        uint32_t token2 = bpe->merges[i].token2;
         uint32_t new_token = INITIAL_VOCAB_SIZE + i;
         
         *num_tokens = merge_pair(tokens, *num_tokens, token1, token2, new_token);
@@ -214,21 +248,29 @@ uint32_t* bpe_encode(BPETokenizer* tokenizer, const char* text, size_t text_len,
     return tokens;
 }
 
-char* bpe_decode(BPETokenizer* tokenizer, const uint32_t* tokens, uint32_t num_tokens) {
+char* decode_bpe(BPE* bpe, const uint32_t* tokens, uint32_t num_tokens) {
+    if (num_tokens == 0) {
+        char* empty = malloc(1);
+        empty[0] = '\0';
+        return empty;
+    }
+    
+    // Calculate total length
     size_t total_len = 0;
     for (uint32_t i = 0; i < num_tokens; i++) {
-        if (tokens[i] < tokenizer->vocab_size) {
-            total_len += tokenizer->vocab_lens[tokens[i]];
+        if (tokens[i] < bpe->vocab_size) {
+            total_len += bpe->vocab_lens[tokens[i]];
         }
     }
     
+    // Build output string
     char* text = malloc(total_len + 1);
     size_t pos = 0;
     
     for (uint32_t i = 0; i < num_tokens; i++) {
-        if (tokens[i] < tokenizer->vocab_size) {
-            memcpy(text + pos, tokenizer->vocab[tokens[i]], tokenizer->vocab_lens[tokens[i]]);
-            pos += tokenizer->vocab_lens[tokens[i]];
+        if (tokens[i] < bpe->vocab_size) {
+            memcpy(text + pos, bpe->vocab[tokens[i]], bpe->vocab_lens[tokens[i]]);
+            pos += bpe->vocab_lens[tokens[i]];
         }
     }
     text[pos] = '\0';
@@ -236,64 +278,87 @@ char* bpe_decode(BPETokenizer* tokenizer, const uint32_t* tokens, uint32_t num_t
     return text;
 }
 
-int bpe_save(BPETokenizer* tokenizer, const char* filename) {
-    FILE* f = fopen(filename, "wb");
-    if (!f) {
+void save_bpe(BPE* bpe, const char* filename) {
+    FILE* file = fopen(filename, "wb");
+    if (!file) {
         printf("Error: Could not open file for writing: %s\n", filename);
-        return -1;
+        return;
     }
     
-    fwrite(&tokenizer->vocab_size, sizeof(uint32_t), 1, f);
-    fwrite(&tokenizer->num_merges, sizeof(uint32_t), 1, f);
-    fwrite(tokenizer->merges, sizeof(Merge), tokenizer->num_merges, f);
+    // Save metadata
+    fwrite(&bpe->vocab_size, sizeof(uint32_t), 1, file);
+    fwrite(&bpe->num_merges, sizeof(uint32_t), 1, file);
+    fwrite(&bpe->target_vocab_size, sizeof(uint32_t), 1, file);
+    fwrite(&bpe->training_step, sizeof(int), 1, file);
     
-    for (uint32_t i = 0; i < tokenizer->vocab_size; i++) {
-        fwrite(&tokenizer->vocab_lens[i], sizeof(uint32_t), 1, f);
-        fwrite(tokenizer->vocab[i], 1, tokenizer->vocab_lens[i], f);
+    // Save merge rules
+    fwrite(bpe->merges, sizeof(Merge), bpe->num_merges, file);
+    
+    // Save vocabulary
+    for (uint32_t i = 0; i < bpe->vocab_size; i++) {
+        fwrite(&bpe->vocab_lens[i], sizeof(uint32_t), 1, file);
+        fwrite(bpe->vocab[i], 1, bpe->vocab_lens[i], file);
     }
     
-    fclose(f);
-    printf("\n✓ Tokenizer saved to: %s\n", filename);
-    return 0;
+    fclose(file);
+    printf("Tokenizer saved to %s\n", filename);
 }
 
-BPETokenizer* bpe_load(const char* filename) {
-    FILE* f = fopen(filename, "rb");
-    if (!f) {
+BPE* load_bpe(const char* filename) {
+    FILE* file = fopen(filename, "rb");
+    if (!file) {
         printf("Error: Could not open file for reading: %s\n", filename);
         return NULL;
     }
     
-    BPETokenizer* tokenizer = malloc(sizeof(BPETokenizer));
-    tokenizer->merges = malloc(MAX_VOCAB_SIZE * sizeof(Merge));
-    tokenizer->vocab = malloc(MAX_VOCAB_SIZE * sizeof(char*));
-    tokenizer->vocab_lens = malloc(MAX_VOCAB_SIZE * sizeof(uint32_t));
+    // Read metadata
+    uint32_t vocab_size, num_merges, target_vocab_size;
+    int training_step;
+    fread(&vocab_size, sizeof(uint32_t), 1, file);
+    fread(&num_merges, sizeof(uint32_t), 1, file);
+    fread(&target_vocab_size, sizeof(uint32_t), 1, file);
+    fread(&training_step, sizeof(int), 1, file);
     
-    fread(&tokenizer->vocab_size, sizeof(uint32_t), 1, f);
-    fread(&tokenizer->num_merges, sizeof(uint32_t), 1, f);
-    fread(tokenizer->merges, sizeof(Merge), tokenizer->num_merges, f);
+    // Initialize BPE structure
+    BPE* bpe = malloc(sizeof(BPE));
+    bpe->vocab_size = vocab_size;
+    bpe->num_merges = num_merges;
+    bpe->target_vocab_size = target_vocab_size;
+    bpe->training_step = training_step;
     
-    for (uint32_t i = 0; i < tokenizer->vocab_size; i++) {
-        fread(&tokenizer->vocab_lens[i], sizeof(uint32_t), 1, f);
-        tokenizer->vocab[i] = malloc(tokenizer->vocab_lens[i] + 1);
-        fread(tokenizer->vocab[i], 1, tokenizer->vocab_lens[i], f);
-        tokenizer->vocab[i][tokenizer->vocab_lens[i]] = '\0';
+    bpe->merges = malloc(MAX_VOCAB_SIZE * sizeof(Merge));
+    bpe->vocab = malloc(MAX_VOCAB_SIZE * sizeof(char*));
+    bpe->vocab_lens = malloc(MAX_VOCAB_SIZE * sizeof(uint32_t));
+    
+    // Read merge rules
+    fread(bpe->merges, sizeof(Merge), bpe->num_merges, file);
+    
+    // Read vocabulary
+    for (uint32_t i = 0; i < bpe->vocab_size; i++) {
+        fread(&bpe->vocab_lens[i], sizeof(uint32_t), 1, file);
+        bpe->vocab[i] = malloc(bpe->vocab_lens[i] + 1);
+        fread(bpe->vocab[i], 1, bpe->vocab_lens[i], file);
+        bpe->vocab[i][bpe->vocab_lens[i]] = '\0';
     }
     
-    fclose(f);
-    printf("✓ Tokenizer loaded from: %s\n", filename);
-    printf("  Vocab size: %u | Merges: %u\n", tokenizer->vocab_size, tokenizer->num_merges);
-    return tokenizer;
+    fclose(file);
+    printf("Tokenizer loaded from %s\n", filename);
+    printf("  Vocab size: %u | Merge rules: %u | Training step: %d\n", 
+           bpe->vocab_size, bpe->num_merges, bpe->training_step);
+    
+    return bpe;
 }
 
-void bpe_print_vocab(BPETokenizer* tokenizer, uint32_t max_entries) {
-    printf("\n=== Vocabulary ===\n");
-    uint32_t limit = max_entries < tokenizer->vocab_size ? max_entries : tokenizer->vocab_size;
+void print_vocab_bpe(BPE* bpe, uint32_t max_entries) {
+    printf("\n=== Vocabulary Sample ===\n");
+    uint32_t start = INITIAL_VOCAB_SIZE;
+    uint32_t limit = start + max_entries;
+    if (limit > bpe->vocab_size) limit = bpe->vocab_size;
     
-    for (uint32_t i = INITIAL_VOCAB_SIZE; i < limit && i < tokenizer->vocab_size; i++) {
-        printf("Token %5u (len %2u): \"", i, tokenizer->vocab_lens[i]);
-        for (uint32_t j = 0; j < tokenizer->vocab_lens[i]; j++) {
-            unsigned char c = tokenizer->vocab[i][j];
+    for (uint32_t i = start; i < limit; i++) {
+        printf("Token %5u (len %2u): \"", i, bpe->vocab_lens[i]);
+        for (uint32_t j = 0; j < bpe->vocab_lens[i]; j++) {
+            unsigned char c = bpe->vocab[i][j];
             if (c >= 32 && c < 127) {
                 printf("%c", c);
             } else {
@@ -302,7 +367,23 @@ void bpe_print_vocab(BPETokenizer* tokenizer, uint32_t max_entries) {
         }
         printf("\"\n");
     }
-    if (tokenizer->vocab_size > limit) {
-        printf("... (%u more entries)\n", tokenizer->vocab_size - limit);
+    
+    if (bpe->vocab_size > limit) {
+        printf("... (%u more entries)\n", bpe->vocab_size - limit);
     }
+}
+
+void print_stats_bpe(BPE* bpe, const char* corpus, size_t corpus_size) {
+    printf("\n=== Tokenization Statistics ===\n");
+    
+    uint32_t num_tokens;
+    uint32_t* tokens = encode_bpe(bpe, corpus, corpus_size, &num_tokens);
+    
+    printf("Original size:      %zu bytes\n", corpus_size);
+    printf("Tokenized size:     %u tokens\n", num_tokens);
+    printf("Compression ratio:  %.2f%%\n", 100.0 * (1.0 - (double)num_tokens / corpus_size));
+    printf("Bytes per token:    %.2f\n", (double)corpus_size / num_tokens);
+    printf("Vocabulary size:    %u\n", bpe->vocab_size);
+    
+    free(tokens);
 }
