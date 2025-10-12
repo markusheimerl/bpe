@@ -18,9 +18,9 @@ typedef struct {
 // ============================================================================
 
 static HashTable* hash_create() {
-    HashTable* ht = malloc(sizeof(HashTable));
+    HashTable* ht = (HashTable*)malloc(sizeof(HashTable));
     ht->size = HASH_SIZE;
-    ht->buckets = calloc(HASH_SIZE, sizeof(HashNode*));
+    ht->buckets = (HashNode **)calloc(HASH_SIZE, sizeof(HashNode*));
     return ht;
 }
 
@@ -58,7 +58,7 @@ static void hash_increment(HashTable* ht, uint64_t pair) {
         node = node->next;
     }
     
-    HashNode* new_node = malloc(sizeof(HashNode));
+    HashNode* new_node = (HashNode*)malloc(sizeof(HashNode));
     new_node->pair = pair;
     new_node->count = 1;
     new_node->next = ht->buckets[idx];
@@ -118,20 +118,20 @@ static uint32_t merge_pair(uint32_t* tokens, uint32_t num_tokens,
 // ============================================================================
 
 BPE* init_bpe(uint32_t target_vocab_size) {
-    BPE* bpe = malloc(sizeof(BPE));
+    BPE* bpe = (BPE*)malloc(sizeof(BPE));
     
     bpe->vocab_size = INITIAL_VOCAB_SIZE;
     bpe->num_merges = 0;
     bpe->target_vocab_size = target_vocab_size;
     bpe->training_step = 0;
     
-    bpe->merges = malloc(MAX_VOCAB_SIZE * sizeof(Merge));
-    bpe->vocab = malloc(MAX_VOCAB_SIZE * sizeof(char*));
-    bpe->vocab_lens = malloc(MAX_VOCAB_SIZE * sizeof(uint32_t));
+    bpe->merges = (Merge *)malloc(MAX_VOCAB_SIZE * sizeof(Merge));
+    bpe->vocab = (char **)malloc(MAX_VOCAB_SIZE * sizeof(char*));
+    bpe->vocab_lens = (uint32_t *)malloc(MAX_VOCAB_SIZE * sizeof(uint32_t));
     
     // Initialize base vocabulary (all bytes)
     for (uint32_t i = 0; i < INITIAL_VOCAB_SIZE; i++) {
-        bpe->vocab[i] = malloc(2);
+        bpe->vocab[i] = (char *)malloc(2);
         bpe->vocab[i][0] = (char)i;
         bpe->vocab[i][1] = '\0';
         bpe->vocab_lens[i] = 1;
@@ -160,7 +160,7 @@ void train_bpe(BPE* bpe, const char* corpus, size_t corpus_size) {
     printf("Merges to perform: %u\n\n", bpe->target_vocab_size - INITIAL_VOCAB_SIZE);
     
     // Initialize token sequence
-    uint32_t* tokens = malloc(corpus_size * sizeof(uint32_t));
+    uint32_t* tokens = (uint32_t *)malloc(corpus_size * sizeof(uint32_t));
     uint32_t num_tokens = corpus_size;
     
     for (size_t i = 0; i < corpus_size; i++) {
@@ -195,7 +195,7 @@ void train_bpe(BPE* bpe, const char* corpus, size_t corpus_size) {
         
         // Create new vocabulary entry
         uint32_t new_len = bpe->vocab_lens[token1] + bpe->vocab_lens[token2];
-        bpe->vocab[new_token] = malloc(new_len + 1);
+        bpe->vocab[new_token] = (char *)malloc(new_len + 1);
         memcpy(bpe->vocab[new_token], bpe->vocab[token1], bpe->vocab_lens[token1]);
         memcpy(bpe->vocab[new_token] + bpe->vocab_lens[token1], 
                bpe->vocab[token2], bpe->vocab_lens[token2]);
@@ -228,7 +228,7 @@ uint32_t* encode_bpe(BPE* bpe, const char* text, size_t text_len, uint32_t* num_
         return NULL;
     }
     
-    uint32_t* tokens = malloc(text_len * sizeof(uint32_t));
+    uint32_t* tokens = (uint32_t*)malloc(text_len * sizeof(uint32_t));
     *num_tokens = text_len;
     
     // Initialize with byte tokens
@@ -250,7 +250,7 @@ uint32_t* encode_bpe(BPE* bpe, const char* text, size_t text_len, uint32_t* num_
 
 char* decode_bpe(BPE* bpe, const uint32_t* tokens, uint32_t num_tokens) {
     if (num_tokens == 0) {
-        char* empty = malloc(1);
+        char* empty = (char *)malloc(1);
         empty[0] = '\0';
         return empty;
     }
@@ -264,7 +264,7 @@ char* decode_bpe(BPE* bpe, const uint32_t* tokens, uint32_t num_tokens) {
     }
     
     // Build output string
-    char* text = malloc(total_len + 1);
+    char* text = (char*)malloc(total_len + 1);
     size_t pos = 0;
     
     for (uint32_t i = 0; i < num_tokens; i++) {
@@ -320,15 +320,15 @@ BPE* load_bpe(const char* filename) {
     fread(&training_step, sizeof(int), 1, file);
     
     // Initialize BPE structure
-    BPE* bpe = malloc(sizeof(BPE));
+    BPE* bpe = (BPE*)malloc(sizeof(BPE));
     bpe->vocab_size = vocab_size;
     bpe->num_merges = num_merges;
     bpe->target_vocab_size = target_vocab_size;
     bpe->training_step = training_step;
     
-    bpe->merges = malloc(MAX_VOCAB_SIZE * sizeof(Merge));
-    bpe->vocab = malloc(MAX_VOCAB_SIZE * sizeof(char*));
-    bpe->vocab_lens = malloc(MAX_VOCAB_SIZE * sizeof(uint32_t));
+    bpe->merges = (Merge *)malloc(MAX_VOCAB_SIZE * sizeof(Merge));
+    bpe->vocab = (char **)malloc(MAX_VOCAB_SIZE * sizeof(char*));
+    bpe->vocab_lens = (uint32_t *)malloc(MAX_VOCAB_SIZE * sizeof(uint32_t));
     
     // Read merge rules
     fread(bpe->merges, sizeof(Merge), bpe->num_merges, file);
@@ -336,7 +336,7 @@ BPE* load_bpe(const char* filename) {
     // Read vocabulary
     for (uint32_t i = 0; i < bpe->vocab_size; i++) {
         fread(&bpe->vocab_lens[i], sizeof(uint32_t), 1, file);
-        bpe->vocab[i] = malloc(bpe->vocab_lens[i] + 1);
+        bpe->vocab[i] = (char *)malloc(bpe->vocab_lens[i] + 1);
         fread(bpe->vocab[i], 1, bpe->vocab_lens[i], file);
         bpe->vocab[i][bpe->vocab_lens[i]] = '\0';
     }

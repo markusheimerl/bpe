@@ -1,6 +1,6 @@
 CC = clang
-CFLAGS = -O3 -march=native -Wall -Wextra -std=c11
-LDFLAGS = -lm
+CFLAGS = -O3 -march=native -Wall -Wextra --cuda-gpu-arch=sm_86 -x cuda
+LDFLAGS = -lm -flto
 
 all: train.out
 
@@ -20,4 +20,4 @@ run: train.out
 	@./train.out
 
 clean:
-	rm -f *.out *.o *.bin
+	rm -f *.out *.o
