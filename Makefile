@@ -1,33 +1,23 @@
 CC = clang
-CFLAGS = -O3 -march=native -ffast-math -Wall -Wextra
-LDFLAGS = -lopenblas -lm -flto
+CFLAGS = -O3 -march=native -Wall -Wextra -std=c11
+LDFLAGS = -lm
 
-train.out: slm.o transformer/transformer.o transformer/attention/attention.o transformer/mlp/mlp.o data.o train.o
-	$(CC) slm.o transformer/transformer.o transformer/attention/attention.o transformer/mlp/mlp.o data.o train.o $(LDFLAGS) -o $@
+all: train.out
 
-slm.o: slm.c slm.h
-	$(CC) $(CFLAGS) -c slm.c -o $@
+train.out: bpe.o data.o train.o
+	$(CC) bpe.o data.o train.o $(LDFLAGS) -o $@
 
-transformer/transformer.o:
-	$(MAKE) -C transformer transformer.o
-
-transformer/attention/attention.o:
-	$(MAKE) -C transformer/attention attention.o
-
-transformer/mlp/mlp.o:
-	$(MAKE) -C transformer/mlp mlp.o
+bpe.o: bpe.c bpe.h
+	$(CC) $(CFLAGS) -c bpe.c -o $@
 
 data.o: data.c data.h
 	$(CC) $(CFLAGS) -c data.c -o $@
 
-train.o: train.c slm.h data.h
+train.o: train.c bpe.h data.h
 	$(CC) $(CFLAGS) -c train.c -o $@
 
 run: train.out
-	@time ./train.out
-
-cont: train.out
-	@time ./train.out $$(ls -t *_slm.bin 2>/dev/null | head -n1)
+	@./train.out
 
 clean:
-	rm -f *.out *.o
+	rm -f *.out *.o *.bin
