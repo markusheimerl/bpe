@@ -209,10 +209,8 @@ void train_bpe(BPE* bpe, const char* corpus, size_t corpus_size) {
         bpe->training_step++;
         
         // Print progress
-        if ((merge_idx + 1) % 100 == 0 || merge_idx < 10 || merge_idx == num_merges - 1) {
-            printf("Step [%4u/%4u]: (%5u, %5u) -> %5u | count: %6u | tokens: %6u\n", 
+        printf("Step [%4u/%4u]: (%5u, %5u) -> %5u | count: %6u | tokens: %6u\n", 
                    merge_idx + 1, num_merges, token1, token2, new_token, max_count, num_tokens);
-        }
     }
     
     free(tokens);
