@@ -58,7 +58,7 @@ int main(int argc, char** argv) {
     signal(SIGINT, handle_sigint);
     
     // Parameters
-    const uint32_t target_vocab_size = 65536;
+    const uint32_t target_vocab_size = 1024;
     
     printf("╔════════════════════════════════════════╗\n");
     printf("║   BPE Tokenizer - Training Program    ║\n");

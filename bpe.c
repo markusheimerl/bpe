@@ -241,6 +241,9 @@ uint32_t* encode_bpe(BPE* bpe, const char* text, size_t text_len, uint32_t* num_
         uint32_t new_token = INITIAL_VOCAB_SIZE + i;
         
         *num_tokens = merge_pair(tokens, *num_tokens, token1, token2, new_token);
+        
+        printf("  Merge [%5u/%5u]: (%5u, %5u) -> %5u | tokens: %6u\n", 
+            i + 1, bpe->num_merges, token1, token2, new_token, *num_tokens);
     }
     
     return tokens;
