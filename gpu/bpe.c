@@ -217,3 +217,73 @@ char* decode_bpe(BPE* bpe, const uint32_t* tokens, uint32_t num_tokens) {
     
     return text;
 }
+
+// Save BPE tokenizer to binary file
+void save_bpe(BPE* bpe, const char* filename) {
+    FILE* file = fopen(filename, "wb");
+    if (!file) {
+        printf("Error opening file for writing: %s\n", filename);
+        return;
+    }
+    
+    // Save vocab_size and num_merges
+    fwrite(&bpe->vocab_size, sizeof(uint32_t), 1, file);
+    fwrite(&bpe->num_merges, sizeof(uint32_t), 1, file);
+    
+    // Save merge rules
+    if (bpe->num_merges > 0) {
+        fwrite(bpe->merge_t1, sizeof(uint32_t), bpe->num_merges, file);
+        fwrite(bpe->merge_t2, sizeof(uint32_t), bpe->num_merges, file);
+    }
+    
+    // Save vocabulary strings
+    for (uint32_t i = 0; i < bpe->vocab_size; i++) {
+        size_t len = strlen(bpe->vocab[i]);
+        fwrite(&len, sizeof(size_t), 1, file);
+        fwrite(bpe->vocab[i], sizeof(char), len, file);
+    }
+    
+    fclose(file);
+    printf("Tokenizer saved to %s\n", filename);
+}
+
+// Load BPE tokenizer from binary file
+BPE* load_bpe(const char* filename) {
+    FILE* file = fopen(filename, "rb");
+    if (!file) {
+        printf("Error opening file for reading: %s\n", filename);
+        return NULL;
+    }
+    
+    BPE* bpe = (BPE*)malloc(sizeof(BPE));
+    
+    // Read vocab_size and num_merges
+    fread(&bpe->vocab_size, sizeof(uint32_t), 1, file);
+    fread(&bpe->num_merges, sizeof(uint32_t), 1, file);
+    
+    // Allocate and read merge rules
+    if (bpe->num_merges > 0) {
+        bpe->merge_t1 = (uint32_t*)malloc(bpe->num_merges * sizeof(uint32_t));
+        bpe->merge_t2 = (uint32_t*)malloc(bpe->num_merges * sizeof(uint32_t));
+        fread(bpe->merge_t1, sizeof(uint32_t), bpe->num_merges, file);
+        fread(bpe->merge_t2, sizeof(uint32_t), bpe->num_merges, file);
+    } else {
+        bpe->merge_t1 = NULL;
+        bpe->merge_t2 = NULL;
+    }
+    
+    // Allocate and read vocabulary strings
+    bpe->vocab = (char**)malloc(bpe->vocab_size * sizeof(char*));
+    for (uint32_t i = 0; i < bpe->vocab_size; i++) {
+        size_t len;
+        fread(&len, sizeof(size_t), 1, file);
+        bpe->vocab[i] = (char*)malloc((len + 1) * sizeof(char));
+        fread(bpe->vocab[i], sizeof(char), len, file);
+        bpe->vocab[i][len] = '\0';
+    }
+    
+    fclose(file);
+    printf("Tokenizer loaded from %s\n", filename);
+    
+    return bpe;
+}

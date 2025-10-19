@@ -32,5 +32,7 @@ void free_bpe(BPE* bpe);
 void train_bpe(BPE* bpe, const char* corpus, size_t corpus_size, uint32_t num_merges);
 uint32_t* encode_bpe(BPE* bpe, const char* text, size_t text_len, uint32_t* num_tokens);
 char* decode_bpe(BPE* bpe, const uint32_t* tokens, uint32_t num_tokens);
+void save_bpe(BPE* bpe, const char* filename);
+BPE* load_bpe(const char* filename);
 
 #endif
