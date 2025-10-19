@@ -1,6 +1,6 @@
 #include "data.h"
 
-#define MAX_CORPUS_SIZE (1024ULL * 1024ULL * 2ULL)
+#define MAX_CORPUS_SIZE (1024ULL * 1024ULL * 100ULL) // 100 MB max
 
 // Load the text corpus from a file
 char* load_corpus(const char* filename, size_t* corpus_size) {
