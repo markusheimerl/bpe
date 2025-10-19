@@ -36,12 +36,12 @@ void test_encode_decode(BPE* bpe, const char* test_text) {
 
 int main() {
     size_t corpus_size;
-    char* corpus = load_corpus("../corpus.txt", &corpus_size);
+    char* corpus = load_corpus("../../corpus.txt", &corpus_size);
     if (!corpus) return 1;
     
     // Train
     BPE* bpe = init_bpe();
-    train_bpe(bpe, corpus, corpus_size, 1024);
+    train_bpe(bpe, corpus, corpus_size, 8192);
     
     // Get timestamp for filename
     char bpe_fname[64];
