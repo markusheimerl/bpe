@@ -1,6 +1,6 @@
 CC = clang
-CFLAGS = -O3 -march=native -Wall -Wextra --cuda-gpu-arch=sm_86 -x cuda
-LDFLAGS = -L/usr/local/cuda/lib64 -lcudart -lm -flto
+CFLAGS = -O3 -march=native -Wall -Wextra
+LDFLAGS = -lm -flto
 
 all: train.out
 
