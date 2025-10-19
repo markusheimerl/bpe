@@ -163,10 +163,13 @@ char* decode_bpe(BPE* bpe, const uint32_t* tokens, uint32_t num_tokens) {
     
     // Concatenate all vocab entries
     char* text = (char*)malloc(total_len + 1);
-    text[0] = '\0';
+    char* ptr = text;
     for (uint32_t i = 0; i < num_tokens; i++) {
-        strcat(text, bpe->vocab[tokens[i]]);
+        size_t len = strlen(bpe->vocab[tokens[i]]);
+        memcpy(ptr, bpe->vocab[tokens[i]], len);
+        ptr += len;
     }
+    *ptr = '\0';
     
     return text;
 }
