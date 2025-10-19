@@ -48,38 +48,19 @@ int main() {
     // Tokenize entire corpus
     printf("\n=== Corpus Compression ===\n");
     printf("Encoding %zu bytes...\n", corpus_size);
-    
-    clock_t start = clock();
     uint32_t num_tokens;
     uint32_t* tokens = encode_bpe(bpe, corpus, corpus_size, &num_tokens);
-    clock_t end = clock();
-    
-    double elapsed = (double)(end - start) / CLOCKS_PER_SEC;
-    double compression_ratio = (double)corpus_size / (double)num_tokens;
-    double throughput = corpus_size / elapsed / (1024 * 1024);  // MB/s
-    
-    printf("\n--- Results ---\n");
-    printf("Original size:     %zu bytes\n", corpus_size);
-    printf("Tokenized:         %u tokens\n", num_tokens);
-    printf("Compression ratio: %.2f:1\n", compression_ratio);
-    printf("Time:              %.3f seconds\n", elapsed);
-    printf("Throughput:        %.2f MB/s\n", throughput);
-    
+    printf("Compression ratio: %.2f:1\n", (double)corpus_size / (double)num_tokens);
+
     // Verify decode
-    printf("\nVerifying decode... ");
-    fflush(stdout);
+    printf("Verifying decode...\n");
     char* decoded = decode_bpe(bpe, tokens, num_tokens);
-    if (memcmp(corpus, decoded, corpus_size) == 0) {
-        printf("✓ Perfect match!\n");
-    } else {
-        printf("✗ Mismatch!\n");
-    }
-    
+    if (memcmp(corpus, decoded, corpus_size) == 0) printf("✓ Perfect match!\n");
+    else printf("✗ Mismatch!\n");
+
     free(tokens);
     free(decoded);
     free(corpus);
     free_bpe(bpe);
-    
-    printf("\n✓ Done!\n");
     return 0;
 }

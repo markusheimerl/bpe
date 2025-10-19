@@ -12,14 +12,11 @@ __global__ void count_pairs_kernel(const uint32_t* tokens, uint32_t* pair_counts
         uint32_t t1 = tokens[i];
         uint32_t t2 = tokens[i + 1];
 
-        if (t1 != INVALID_TOKEN && t2 != INVALID_TOKEN) {
-            atomicAdd(&pair_counts[t1 * max_vocab_size + t2], 1);
-        }
+        if (t1 != INVALID_TOKEN && t2 != INVALID_TOKEN) atomicAdd(&pair_counts[t1 * max_vocab_size + t2], 1);
     }
 }
 
 // CUDA kernel to replace a specific token pair with a new token
-// Fixed: claim position i first, then i+1, with proper rollback
 __global__ void replace_pair_kernel(uint32_t* tokens, size_t num_tokens, 
                                     uint32_t t1, uint32_t t2, uint32_t new_token) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -27,15 +24,10 @@ __global__ void replace_pair_kernel(uint32_t* tokens, size_t num_tokens,
 
     for (size_t i = idx; i < num_tokens - 1; i += stride) {
         if (tokens[i] == t1 && tokens[i + 1] == t2) {
-            // First, atomically claim position i by replacing t1 with new_token
             uint32_t old_i = atomicCAS(&tokens[i], t1, new_token);
             if (old_i == t1) {
-                // Successfully claimed position i, now try to invalidate position i+1
                 uint32_t old_i1 = atomicCAS(&tokens[i + 1], t2, INVALID_TOKEN);
-                if (old_i1 != t2) {
-                    // Failed to claim i+1 (another thread got it first), rollback
-                    atomicCAS(&tokens[i], new_token, t1);
-                }
+                if (old_i1 != t2) atomicCAS(&tokens[i], new_token, t1);
             }
         }
     }
@@ -73,9 +65,7 @@ void train_bpe(BPE* bpe, const char* corpus, size_t corpus_size, uint32_t max_vo
     
     // Initialize token sequence as bytes on host
     uint32_t* h_tokens = (uint32_t*)malloc(corpus_size * sizeof(uint32_t));
-    for (size_t i = 0; i < corpus_size; i++) {
-        h_tokens[i] = (unsigned char)corpus[i];
-    }
+    for (size_t i = 0; i < corpus_size; i++) h_tokens[i] = (unsigned char)corpus[i];
     
     // Allocate GPU memory
     uint32_t* d_tokens;
