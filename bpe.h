@@ -9,7 +9,6 @@
 typedef struct {
     char** vocab;
     uint32_t vocab_size;
-    uint32_t vocab_capacity;
 } BPE;
 
 BPE* init_bpe();

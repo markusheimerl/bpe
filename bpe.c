@@ -3,8 +3,7 @@
 BPE* init_bpe() {
     BPE* bpe = (BPE*)malloc(sizeof(BPE));
     bpe->vocab_size = 256;
-    bpe->vocab_capacity = 256;
-    bpe->vocab = (char**)malloc(bpe->vocab_capacity * sizeof(char*));
+    bpe->vocab = (char**)malloc(256 * sizeof(char*));
     
     // Initialize base vocabulary (all bytes)
     for (uint32_t i = 0; i < 256; i++) {
@@ -35,14 +34,15 @@ void train_bpe(BPE* bpe, const char* corpus, size_t corpus_size, uint32_t num_me
     
     // Do num_merges iterations
     for (uint32_t merge_iter = 0; merge_iter < num_merges; merge_iter++) {
-        // Count all pairs
+        // Find most frequent pair
         uint32_t best_t1 = 0, best_t2 = 0, best_count = 0;
         
+        // Consider every adjacent pair
         for (uint32_t i = 0; i < num_tokens - 1; i++) {
             uint32_t t1 = tokens[i];
             uint32_t t2 = tokens[i + 1];
             
-            // Count how many times this pair appears
+            // Count this pair everywhere in the sequence
             uint32_t count = 0;
             for (uint32_t j = 0; j < num_tokens - 1; j++) {
                 if (tokens[j] == t1 && tokens[j + 1] == t2) {
@@ -59,12 +59,8 @@ void train_bpe(BPE* bpe, const char* corpus, size_t corpus_size, uint32_t num_me
         
         if (best_count == 0) break;
         
-        // Expand vocab if needed
-        if (bpe->vocab_size >= bpe->vocab_capacity) {
-            bpe->vocab_capacity *= 2;
-            bpe->vocab = (char**)realloc(bpe->vocab, bpe->vocab_capacity * sizeof(char*));
-        }
-        
+        // Grow vocab array
+        bpe->vocab = (char**)realloc(bpe->vocab, (bpe->vocab_size + 1) * sizeof(char*));
         uint32_t new_token = bpe->vocab_size;
         
         // Create new vocab entry by concatenating
@@ -75,20 +71,19 @@ void train_bpe(BPE* bpe, const char* corpus, size_t corpus_size, uint32_t num_me
         strcat(bpe->vocab[new_token], bpe->vocab[best_t2]);
         bpe->vocab_size++;
         
-        // Replace all occurrences of the pair with new token
-        uint32_t new_num_tokens = 0;
+        // Replace all occurrences in token sequence
+        uint32_t write_pos = 0;
         for (uint32_t i = 0; i < num_tokens; i++) {
             if (i < num_tokens - 1 && tokens[i] == best_t1 && tokens[i + 1] == best_t2) {
-                tokens[new_num_tokens++] = new_token;
+                tokens[write_pos++] = new_token;
                 i++;  // Skip next token
             } else {
-                tokens[new_num_tokens++] = tokens[i];
+                tokens[write_pos++] = tokens[i];
             }
         }
-        num_tokens = new_num_tokens;
+        num_tokens = write_pos;
         
-        printf("Merge %u: (%u, %u) -> %u | count: %u | tokens: %u\n", 
-               merge_iter + 1, best_t1, best_t2, new_token, best_count, num_tokens);
+        printf("Merge %u: (%u, %u) -> %u | count: %u | tokens: %u\n", merge_iter + 1, best_t1, best_t2, new_token, best_count, num_tokens);
     }
     
     free(tokens);
@@ -101,52 +96,44 @@ uint32_t* encode_bpe(BPE* bpe, const char* text, size_t text_len, uint32_t* num_
         return NULL;
     }
     
+    // Start with bytes
     uint32_t* tokens = (uint32_t*)malloc(text_len * sizeof(uint32_t));
     *num_tokens = text_len;
+    for (size_t i = 0; i < text_len; i++) tokens[i] = (unsigned char)text[i];
     
-    // Start with bytes
-    for (size_t i = 0; i < text_len; i++) {
-        tokens[i] = (unsigned char)text[i];
-    }
-    
-    // Keep merging until no more merges possible
-    int merged = 1;
-    while (merged) {
-        merged = 0;
+    // Repeatedly find and merge pairs
+    int changed = 1;
+    while (changed) {
+        changed = 0;
         
-        // Try all vocab entries from highest to lowest (newest to oldest)
-        for (uint32_t v = bpe->vocab_size - 1; v >= 256; v--) {
-            // Try to find what pair creates this vocab entry
-            for (uint32_t t1 = 0; t1 < v; t1++) {
-                for (uint32_t t2 = 0; t2 < v; t2++) {
-                    size_t len1 = strlen(bpe->vocab[t1]);
-                    size_t len2 = strlen(bpe->vocab[t2]);
-                    size_t vlen = strlen(bpe->vocab[v]);
-                    
-                    if (len1 + len2 != vlen) continue;
-                    
-                    // Check if concatenating t1 and t2 gives us v
-                    char* combined = (char*)malloc(len1 + len2 + 1);
-                    strcpy(combined, bpe->vocab[t1]);
-                    strcat(combined, bpe->vocab[t2]);
-                    
-                    if (strcmp(combined, bpe->vocab[v]) == 0) {
-                        // Found the pair! Now merge all occurrences
-                        uint32_t new_num = 0;
-                        for (uint32_t i = 0; i < *num_tokens; i++) {
-                            if (i < *num_tokens - 1 && tokens[i] == t1 && tokens[i + 1] == t2) {
-                                tokens[new_num++] = v;
-                                i++;
-                                merged = 1;
-                            } else {
-                                tokens[new_num++] = tokens[i];
-                            }
+        // Try to find any pair that exists in vocab
+        for (uint32_t i = 0; i < *num_tokens - 1; i++) {
+            uint32_t t1 = tokens[i];
+            uint32_t t2 = tokens[i + 1];
+            
+            // Search vocab for this pair
+            for (uint32_t v = 256; v < bpe->vocab_size; v++) {
+                // Check if vocab[v] = vocab[t1] + vocab[t2]
+                size_t len1 = strlen(bpe->vocab[t1]);
+                size_t len2 = strlen(bpe->vocab[t2]);
+                size_t vlen = strlen(bpe->vocab[v]);
+                
+                if (len1 + len2 == vlen) {
+                    if (memcmp(bpe->vocab[v], bpe->vocab[t1], len1) == 0 &&
+                        memcmp(bpe->vocab[v] + len1, bpe->vocab[t2], len2) == 0) {
+                        // Found it! Merge this one occurrence
+                        tokens[i] = v;
+                        // Shift rest left
+                        for (uint32_t j = i + 1; j < *num_tokens - 1; j++) {
+                            tokens[j] = tokens[j + 1];
                         }
-                        *num_tokens = new_num;
+                        (*num_tokens)--;
+                        changed = 1;
+                        break;
                     }
-                    free(combined);
                 }
             }
+            if (changed) break;  // Start over from beginning
         }
     }
     
