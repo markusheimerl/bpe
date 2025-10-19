@@ -19,6 +19,7 @@ __global__ void count_pairs_kernel(const uint32_t* tokens, uint32_t* pair_counts
 }
 
 // CUDA kernel to replace a specific token pair with a new token
+// Fixed: claim position i first, then i+1, with proper rollback
 __global__ void replace_pair_kernel(uint32_t* tokens, size_t num_tokens, 
                                     uint32_t t1, uint32_t t2, uint32_t new_token) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -26,8 +27,16 @@ __global__ void replace_pair_kernel(uint32_t* tokens, size_t num_tokens,
 
     for (size_t i = idx; i < num_tokens - 1; i += stride) {
         if (tokens[i] == t1 && tokens[i + 1] == t2) {
-            tokens[i] = new_token;
-            tokens[i + 1] = INVALID_TOKEN;
+            // First, atomically claim position i by replacing t1 with new_token
+            uint32_t old_i = atomicCAS(&tokens[i], t1, new_token);
+            if (old_i == t1) {
+                // Successfully claimed position i, now try to invalidate position i+1
+                uint32_t old_i1 = atomicCAS(&tokens[i + 1], t2, INVALID_TOKEN);
+                if (old_i1 != t2) {
+                    // Failed to claim i+1 (another thread got it first), rollback
+                    atomicCAS(&tokens[i], new_token, t1);
+                }
+            }
         }
     }
 }
@@ -36,6 +45,9 @@ BPE* init_bpe() {
     BPE* bpe = (BPE*)malloc(sizeof(BPE));
     bpe->vocab_size = 256;
     bpe->vocab = (char**)malloc(256 * sizeof(char*));
+    bpe->merge_t1 = NULL;
+    bpe->merge_t2 = NULL;
+    bpe->num_merges = 0;
     
     // Initialize base vocabulary (all bytes)
     for (uint32_t i = 0; i < 256; i++) {
@@ -51,6 +63,8 @@ void free_bpe(BPE* bpe) {
     if (!bpe) return;
     for (uint32_t i = 0; i < bpe->vocab_size; i++) free(bpe->vocab[i]);
     free(bpe->vocab);
+    if (bpe->merge_t1) free(bpe->merge_t1);
+    if (bpe->merge_t2) free(bpe->merge_t2);
     free(bpe);
 }
 
@@ -74,6 +88,10 @@ void train_bpe(BPE* bpe, const char* corpus, size_t corpus_size, uint32_t max_vo
     CHECK_CUDA(cudaMemcpy(d_tokens, h_tokens, corpus_size * sizeof(uint32_t), cudaMemcpyHostToDevice));
     
     uint32_t* h_pair_counts = (uint32_t*)malloc(counts_size * sizeof(uint32_t));
+    
+    // Allocate merge rule arrays
+    bpe->merge_t1 = (uint32_t*)malloc(num_merges * sizeof(uint32_t));
+    bpe->merge_t2 = (uint32_t*)malloc(num_merges * sizeof(uint32_t));
     
     int block_size = 256;
     int num_blocks = (corpus_size + block_size - 1) / block_size;
@@ -104,6 +122,11 @@ void train_bpe(BPE* bpe, const char* corpus, size_t corpus_size, uint32_t max_vo
         }
         
         if (best_count == 0) break;
+        
+        // Record this merge rule
+        bpe->merge_t1[merge_iter] = best_t1;
+        bpe->merge_t2[merge_iter] = best_t2;
+        bpe->num_merges = merge_iter + 1;
         
         // Grow vocab array
         bpe->vocab = (char**)realloc(bpe->vocab, (bpe->vocab_size + 1) * sizeof(char*));
@@ -139,48 +162,44 @@ uint32_t* encode_bpe(BPE* bpe, const char* text, size_t text_len, uint32_t* num_
         return NULL;
     }
     
-    // Start with bytes
-    uint32_t* tokens = (uint32_t*)malloc(text_len * sizeof(uint32_t));
-    *num_tokens = text_len;
-    for (size_t i = 0; i < text_len; i++) tokens[i] = (unsigned char)text[i];
+    // Allocate GPU memory
+    uint32_t* d_tokens;
+    CHECK_CUDA(cudaMalloc(&d_tokens, text_len * sizeof(uint32_t)));
     
-    // Repeatedly find and merge pairs
-    int changed = 1;
-    while (changed) {
-        changed = 0;
+    // Initialize token sequence as bytes on host and copy to device
+    uint32_t* h_tokens = (uint32_t*)malloc(text_len * sizeof(uint32_t));
+    for (size_t i = 0; i < text_len; i++) h_tokens[i] = (unsigned char)text[i];
+    CHECK_CUDA(cudaMemcpy(d_tokens, h_tokens, text_len * sizeof(uint32_t), cudaMemcpyHostToDevice));
+    
+    int block_size = 256;
+    int num_blocks = (text_len + block_size - 1) / block_size;
+    
+    // Apply all learned merges in the order they were learned
+    for (uint32_t merge_idx = 0; merge_idx < bpe->num_merges; merge_idx++) {
+        uint32_t t1 = bpe->merge_t1[merge_idx];
+        uint32_t t2 = bpe->merge_t2[merge_idx];
+        uint32_t new_token = 256 + merge_idx;
         
-        // Try to find any pair that exists in vocab
-        for (uint32_t i = 0; i < *num_tokens - 1; i++) {
-            uint32_t t1 = tokens[i];
-            uint32_t t2 = tokens[i + 1];
-            
-            // Search vocab for this pair
-            for (uint32_t v = 256; v < bpe->vocab_size; v++) {
-                // Check if vocab[v] = vocab[t1] + vocab[t2]
-                size_t len1 = strlen(bpe->vocab[t1]);
-                size_t len2 = strlen(bpe->vocab[t2]);
-                size_t vlen = strlen(bpe->vocab[v]);
-                
-                if (len1 + len2 == vlen) {
-                    if (memcmp(bpe->vocab[v], bpe->vocab[t1], len1) == 0 &&
-                        memcmp(bpe->vocab[v] + len1, bpe->vocab[t2], len2) == 0) {
-                        // Found it! Merge this one occurrence
-                        tokens[i] = v;
-                        // Shift rest left
-                        for (uint32_t j = i + 1; j < *num_tokens - 1; j++) {
-                            tokens[j] = tokens[j + 1];
-                        }
-                        (*num_tokens)--;
-                        changed = 1;
-                        break;
-                    }
-                }
-            }
-            if (changed) break;  // Start over from beginning
-        }
+        replace_pair_kernel<<<num_blocks, block_size>>>(d_tokens, text_len, t1, t2, new_token);
+        CHECK_CUDA(cudaDeviceSynchronize());
     }
     
-    return tokens;
+    // Copy the token array back to host
+    CHECK_CUDA(cudaMemcpy(h_tokens, d_tokens, text_len * sizeof(uint32_t), cudaMemcpyDeviceToHost));
+    
+    // Compact the array by removing INVALID_TOKENs
+    uint32_t* final_tokens = (uint32_t*)malloc(text_len * sizeof(uint32_t));
+    uint32_t count = 0;
+    for (size_t i = 0; i < text_len; i++) {
+        if (h_tokens[i] != INVALID_TOKEN) final_tokens[count++] = h_tokens[i];
+    }
+    *num_tokens = count;
+    
+    // Cleanup
+    free(h_tokens);
+    CHECK_CUDA(cudaFree(d_tokens));
+    
+    return final_tokens;
 }
 
 char* decode_bpe(BPE* bpe, const uint32_t* tokens, uint32_t num_tokens) {
@@ -198,10 +217,13 @@ char* decode_bpe(BPE* bpe, const uint32_t* tokens, uint32_t num_tokens) {
     
     // Concatenate all vocab entries
     char* text = (char*)malloc(total_len + 1);
-    text[0] = '\0';
+    char* ptr = text;
     for (uint32_t i = 0; i < num_tokens; i++) {
-        strcat(text, bpe->vocab[tokens[i]]);
+        size_t len = strlen(bpe->vocab[tokens[i]]);
+        memcpy(ptr, bpe->vocab[tokens[i]], len);
+        ptr += len;
     }
+    *ptr = '\0';
     
     return text;
 }

@@ -22,6 +22,9 @@
 typedef struct {
     char** vocab;
     uint32_t vocab_size;
+    uint32_t* merge_t1;  // First token of each merge
+    uint32_t* merge_t2;  // Second token of each merge
+    uint32_t num_merges;
 } BPE;
 
 BPE* init_bpe();
