@@ -20,7 +20,7 @@ typedef struct {
 static HashTable* hash_create() {
     HashTable* ht = (HashTable*)malloc(sizeof(HashTable));
     ht->size = HASH_SIZE;
-    ht->buckets = (HashNode **)calloc(HASH_SIZE, sizeof(HashNode*));
+    ht->buckets = (HashNode**)calloc(HASH_SIZE, sizeof(HashNode*));
     return ht;
 }
 
@@ -50,6 +50,7 @@ static void hash_increment(HashTable* ht, uint64_t pair) {
     uint32_t idx = hash_function(pair);
     HashNode* node = ht->buckets[idx];
     
+    // Search for existing pair
     while (node) {
         if (node->pair == pair) {
             node->count++;
@@ -58,6 +59,7 @@ static void hash_increment(HashTable* ht, uint64_t pair) {
         node = node->next;
     }
     
+    // Add new pair
     HashNode* new_node = (HashNode*)malloc(sizeof(HashNode));
     new_node->pair = pair;
     new_node->count = 1;
@@ -125,13 +127,13 @@ BPE* init_bpe(uint32_t target_vocab_size) {
     bpe->target_vocab_size = target_vocab_size;
     bpe->training_step = 0;
     
-    bpe->merges = (Merge *)malloc(MAX_VOCAB_SIZE * sizeof(Merge));
-    bpe->vocab = (char **)malloc(MAX_VOCAB_SIZE * sizeof(char*));
-    bpe->vocab_lens = (uint32_t *)malloc(MAX_VOCAB_SIZE * sizeof(uint32_t));
+    bpe->merges = (Merge*)malloc(MAX_VOCAB_SIZE * sizeof(Merge));
+    bpe->vocab = (char**)malloc(MAX_VOCAB_SIZE * sizeof(char*));
+    bpe->vocab_lens = (uint32_t*)malloc(MAX_VOCAB_SIZE * sizeof(uint32_t));
     
     // Initialize base vocabulary (all bytes)
     for (uint32_t i = 0; i < INITIAL_VOCAB_SIZE; i++) {
-        bpe->vocab[i] = (char *)malloc(2);
+        bpe->vocab[i] = (char*)malloc(2);
         bpe->vocab[i][0] = (char)i;
         bpe->vocab[i][1] = '\0';
         bpe->vocab_lens[i] = 1;
@@ -155,12 +157,11 @@ void free_bpe(BPE* bpe) {
 void train_bpe(BPE* bpe, const char* corpus, size_t corpus_size) {
     printf("\n=== Training BPE Tokenizer ===\n");
     printf("Corpus size: %zu bytes\n", corpus_size);
-    printf("Initial vocab size: %u\n", bpe->vocab_size);
     printf("Target vocab size: %u\n", bpe->target_vocab_size);
     printf("Merges to perform: %u\n\n", bpe->target_vocab_size - INITIAL_VOCAB_SIZE);
     
     // Initialize token sequence
-    uint32_t* tokens = (uint32_t *)malloc(corpus_size * sizeof(uint32_t));
+    uint32_t* tokens = (uint32_t*)malloc(corpus_size * sizeof(uint32_t));
     uint32_t num_tokens = corpus_size;
     
     for (size_t i = 0; i < corpus_size; i++) {
@@ -195,31 +196,23 @@ void train_bpe(BPE* bpe, const char* corpus, size_t corpus_size) {
         
         // Create new vocabulary entry
         uint32_t new_len = bpe->vocab_lens[token1] + bpe->vocab_lens[token2];
-        bpe->vocab[new_token] = (char *)malloc(new_len + 1);
+        bpe->vocab[new_token] = (char*)malloc(new_len + 1);
         memcpy(bpe->vocab[new_token], bpe->vocab[token1], bpe->vocab_lens[token1]);
-        memcpy(bpe->vocab[new_token] + bpe->vocab_lens[token1], 
-               bpe->vocab[token2], bpe->vocab_lens[token2]);
+        memcpy(bpe->vocab[new_token] + bpe->vocab_lens[token1], bpe->vocab[token2], bpe->vocab_lens[token2]);
         bpe->vocab[new_token][new_len] = '\0';
         bpe->vocab_lens[new_token] = new_len;
         bpe->vocab_size++;
         
         // Apply merge
         num_tokens = merge_pair(tokens, num_tokens, token1, token2, new_token);
-        
         bpe->training_step++;
         
         // Print progress
-        if ((merge_idx + 1) % 100 == 0 || merge_idx < 10 || merge_idx == num_merges - 1) {
-            printf("Step [%4u/%4u]: (%5u, %5u) -> %5u | count: %6u | tokens: %6u\n", 
-                   merge_idx + 1, num_merges, token1, token2, new_token, max_count, num_tokens);
-        }
+        printf("Step %4u/%4u: (%u, %u) -> %u | count: %u | tokens: %u\n", merge_idx + 1, num_merges, token1, token2, new_token, max_count, num_tokens);
     }
     
     free(tokens);
-    
-    printf("\nTraining complete!\n");
-    printf("Final vocabulary size: %u\n", bpe->vocab_size);
-    printf("Total merge rules: %u\n", bpe->num_merges);
+    printf("\nTraining complete! Vocab size: %u | Merge rules: %u\n", bpe->vocab_size, bpe->num_merges);
 }
 
 uint32_t* encode_bpe(BPE* bpe, const char* text, size_t text_len, uint32_t* num_tokens) {
@@ -250,7 +243,7 @@ uint32_t* encode_bpe(BPE* bpe, const char* text, size_t text_len, uint32_t* num_
 
 char* decode_bpe(BPE* bpe, const uint32_t* tokens, uint32_t num_tokens) {
     if (num_tokens == 0) {
-        char* empty = (char *)malloc(1);
+        char* empty = (char*)malloc(1);
         empty[0] = '\0';
         return empty;
     }
@@ -326,9 +319,9 @@ BPE* load_bpe(const char* filename) {
     bpe->target_vocab_size = target_vocab_size;
     bpe->training_step = training_step;
     
-    bpe->merges = (Merge *)malloc(MAX_VOCAB_SIZE * sizeof(Merge));
-    bpe->vocab = (char **)malloc(MAX_VOCAB_SIZE * sizeof(char*));
-    bpe->vocab_lens = (uint32_t *)malloc(MAX_VOCAB_SIZE * sizeof(uint32_t));
+    bpe->merges = (Merge*)malloc(MAX_VOCAB_SIZE * sizeof(Merge));
+    bpe->vocab = (char**)malloc(MAX_VOCAB_SIZE * sizeof(char*));
+    bpe->vocab_lens = (uint32_t*)malloc(MAX_VOCAB_SIZE * sizeof(uint32_t));
     
     // Read merge rules
     fread(bpe->merges, sizeof(Merge), bpe->num_merges, file);
@@ -336,7 +329,7 @@ BPE* load_bpe(const char* filename) {
     // Read vocabulary
     for (uint32_t i = 0; i < bpe->vocab_size; i++) {
         fread(&bpe->vocab_lens[i], sizeof(uint32_t), 1, file);
-        bpe->vocab[i] = (char *)malloc(bpe->vocab_lens[i] + 1);
+        bpe->vocab[i] = (char*)malloc(bpe->vocab_lens[i] + 1);
         fread(bpe->vocab[i], 1, bpe->vocab_lens[i], file);
         bpe->vocab[i][bpe->vocab_lens[i]] = '\0';
     }
@@ -353,10 +346,12 @@ void print_vocab_bpe(BPE* bpe, uint32_t max_entries) {
     printf("\n=== Vocabulary Sample ===\n");
     uint32_t start = INITIAL_VOCAB_SIZE;
     uint32_t limit = start + max_entries;
-    if (limit > bpe->vocab_size) limit = bpe->vocab_size;
+    if (limit > bpe->vocab_size) {
+        limit = bpe->vocab_size;
+    }
     
     for (uint32_t i = start; i < limit; i++) {
-        printf("Token %5u (len %2u): \"", i, bpe->vocab_lens[i]);
+        printf("Token %u (len %u): \"", i, bpe->vocab_lens[i]);
         for (uint32_t j = 0; j < bpe->vocab_lens[i]; j++) {
             unsigned char c = bpe->vocab[i][j];
             if (c >= 32 && c < 127) {

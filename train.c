@@ -7,7 +7,6 @@
 
 BPE* bpe = NULL;
 
-// SIGINT handler to save tokenizer and exit
 void handle_sigint(int signum) {
     if (bpe) {
         char tokenizer_filename[64];
@@ -19,7 +18,6 @@ void handle_sigint(int signum) {
     exit(128 + signum);
 }
 
-// Test encoding and decoding
 void test_encode_decode(BPE* bpe, const char* test_text) {
     printf("\n--- Test ---\n");
     printf("Input:  \"%s\"\n", test_text);
@@ -28,6 +26,7 @@ void test_encode_decode(BPE* bpe, const char* test_text) {
     uint32_t num_tokens;
     uint32_t* tokens = encode_bpe(bpe, test_text, text_len, &num_tokens);
     
+    // Print tokens
     printf("Tokens: [");
     uint32_t max_print = 20;
     for (uint32_t i = 0; i < num_tokens && i < max_print; i++) {
@@ -57,12 +56,7 @@ int main(int argc, char** argv) {
     srand(time(NULL));
     signal(SIGINT, handle_sigint);
     
-    // Parameters
     const uint32_t target_vocab_size = 1024;
-    
-    printf("╔════════════════════════════════════════╗\n");
-    printf("║   BPE Tokenizer - Training Program    ║\n");
-    printf("╚════════════════════════════════════════╝\n");
     
     // Load corpus
     size_t corpus_size;
@@ -94,29 +88,18 @@ int main(int argc, char** argv) {
     // Show vocabulary sample
     print_vocab_bpe(bpe, 20);
     
-    // Get timestamp for filenames
+    // Save tokenizer with timestamped filename
     char tokenizer_fname[64];
     time_t now = time(NULL);
-    strftime(tokenizer_fname, sizeof(tokenizer_fname), 
-             "%Y%m%d_%H%M%S_bpe.bin", localtime(&now));
-    
-    // Save tokenizer with timestamped filename
+    strftime(tokenizer_fname, sizeof(tokenizer_fname), "%Y%m%d_%H%M%S_bpe.bin", localtime(&now));
     save_bpe(bpe, tokenizer_fname);
     
     // Testing phase
-    printf("\n╔════════════════════════════════════════╗\n");
-    printf("║            Testing Phase               ║\n");
-    printf("╚════════════════════════════════════════╝\n");
-    
     test_encode_decode(bpe, "Hello, world!");
     test_encode_decode(bpe, "BPE tokenization is awesome!");
     test_encode_decode(bpe, "The quick brown fox jumps over the lazy dog.");
     
     // Corpus statistics
-    printf("\n╔════════════════════════════════════════╗\n");
-    printf("║         Corpus Statistics              ║\n");
-    printf("╚════════════════════════════════════════╝\n");
-    
     print_stats_bpe(bpe, corpus, corpus_size);
     
     // Verification: Load the saved tokenizer and verify
@@ -124,7 +107,6 @@ int main(int argc, char** argv) {
     BPE* loaded_bpe = load_bpe(tokenizer_fname);
     
     if (loaded_bpe) {
-        // Test loaded tokenizer
         const char* verify_text = "Verification test string.";
         uint32_t num_tokens1, num_tokens2;
         uint32_t* tokens1 = encode_bpe(bpe, verify_text, strlen(verify_text), &num_tokens1);

@@ -16,18 +16,13 @@ typedef struct {
 } Merge;
 
 typedef struct {
-    // Vocabulary
     char** vocab;
     uint32_t* vocab_lens;
     uint32_t vocab_size;
-    
-    // Merge rules
-    Merge* merges;
     uint32_t num_merges;
     uint32_t target_vocab_size;
-    
-    // Training state
     int training_step;
+    Merge* merges;
 } BPE;
 
 BPE* init_bpe(uint32_t target_vocab_size);
