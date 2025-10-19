@@ -34,22 +34,16 @@ void test_encode_decode(BPE* bpe, const char* test_text) {
 }
 
 int main() {
-    // Load corpus
     size_t corpus_size;
     char* corpus = load_corpus("corpus.txt", &corpus_size);
-    if (!corpus) {
-        return 1;
-    }
+    if (!corpus) return 1;
     
-    // Initialize and train
-    BPE* bpe = init_bpe(1024);
-    train_bpe(bpe, corpus, corpus_size);
+    BPE* bpe = init_bpe();
+    train_bpe(bpe, corpus, corpus_size, 768);  // 256 + 768 = 1024 vocab size
     
-    // Test
     test_encode_decode(bpe, "Hello, world!");
     test_encode_decode(bpe, "BPE tokenization is awesome!");
     
-    // Cleanup
     free(corpus);
     free_bpe(bpe);
     
