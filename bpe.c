@@ -22,7 +22,7 @@ void free_bpe(BPE* bpe) {
     free(bpe);
 }
 
-void train_bpe(BPE* bpe, const char* corpus, size_t corpus_size, uint32_t num_merges) {
+void train_bpe(BPE* bpe, const char* corpus, size_t corpus_size, uint32_t max_vocab_size) {
     printf("\n=== Training BPE ===\n");
     
     // Initialize token sequence as bytes
@@ -32,28 +32,35 @@ void train_bpe(BPE* bpe, const char* corpus, size_t corpus_size, uint32_t num_me
         tokens[i] = (unsigned char)corpus[i];
     }
     
+    // Pre-allocate pair counts array for maximum vocab size
+    uint32_t num_merges = max_vocab_size - 256;
+    size_t map_size = (size_t)max_vocab_size * max_vocab_size;
+    uint32_t* pair_counts = (uint32_t*)malloc(map_size * sizeof(uint32_t));
+    
     // Do num_merges iterations
     for (uint32_t merge_iter = 0; merge_iter < num_merges; merge_iter++) {
-        // Find most frequent pair
-        uint32_t best_t1 = 0, best_t2 = 0, best_count = 0;
+        // Reset pair counts
+        memset(pair_counts, 0, map_size * sizeof(uint32_t));
         
-        // Consider every adjacent pair
+        // Count pairs
         for (uint32_t i = 0; i < num_tokens - 1; i++) {
             uint32_t t1 = tokens[i];
             uint32_t t2 = tokens[i + 1];
-            
-            // Count this pair everywhere in the sequence
-            uint32_t count = 0;
-            for (uint32_t j = 0; j < num_tokens - 1; j++) {
-                if (tokens[j] == t1 && tokens[j + 1] == t2) {
-                    count++;
+            size_t idx = (size_t)t1 * max_vocab_size + t2;
+            pair_counts[idx]++;
+        }
+        
+        // Find most frequent pair
+        uint32_t best_t1 = 0, best_t2 = 0, best_count = 0;
+        for (uint32_t t1 = 0; t1 < bpe->vocab_size; t1++) {
+            for (uint32_t t2 = 0; t2 < bpe->vocab_size; t2++) {
+                size_t idx = (size_t)t1 * max_vocab_size + t2;
+                uint32_t count = pair_counts[idx];
+                if (count > best_count) {
+                    best_count = count;
+                    best_t1 = t1;
+                    best_t2 = t2;
                 }
-            }
-            
-            if (count > best_count) {
-                best_count = count;
-                best_t1 = t1;
-                best_t2 = t2;
             }
         }
         
@@ -86,6 +93,7 @@ void train_bpe(BPE* bpe, const char* corpus, size_t corpus_size, uint32_t num_me
         printf("Merge %u: (%u, %u) -> %u | count: %u | tokens: %u\n", merge_iter + 1, best_t1, best_t2, new_token, best_count, num_tokens);
     }
     
+    free(pair_counts);
     free(tokens);
     printf("\nDone! Vocab size: %u\n", bpe->vocab_size);
 }
