@@ -39,10 +39,10 @@ int main() {
     if (!corpus) return 1;
     
     BPE* bpe = init_bpe();
-    train_bpe(bpe, corpus, corpus_size, 768);  // 256 + 768 = 1024 vocab size
+    train_bpe(bpe, corpus, corpus_size, 1024);
     
     test_encode_decode(bpe, "Hello, world!");
-    test_encode_decode(bpe, "BPE tokenization is awesome!");
+    test_encode_decode(bpe, "<|bos|>BPE tokenization is awesome!");
     
     free(corpus);
     free_bpe(bpe);

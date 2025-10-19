@@ -1,5 +1,37 @@
 #include "bpe.h"
 
+#define INVALID_TOKEN UINT32_MAX
+
+// CUDA kernel to count all adjacent token pairs
+__global__ void count_pairs_kernel(const uint32_t* tokens, uint32_t* pair_counts, 
+                                   size_t num_tokens, uint32_t max_vocab_size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = gridDim.x * blockDim.x;
+
+    for (size_t i = idx; i < num_tokens - 1; i += stride) {
+        uint32_t t1 = tokens[i];
+        uint32_t t2 = tokens[i + 1];
+
+        if (t1 != INVALID_TOKEN && t2 != INVALID_TOKEN) {
+            atomicAdd(&pair_counts[t1 * max_vocab_size + t2], 1);
+        }
+    }
+}
+
+// CUDA kernel to replace a specific token pair with a new token
+__global__ void replace_pair_kernel(uint32_t* tokens, size_t num_tokens, 
+                                    uint32_t t1, uint32_t t2, uint32_t new_token) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = gridDim.x * blockDim.x;
+
+    for (size_t i = idx; i < num_tokens - 1; i += stride) {
+        if (tokens[i] == t1 && tokens[i + 1] == t2) {
+            tokens[i] = new_token;
+            tokens[i + 1] = INVALID_TOKEN;
+        }
+    }
+}
+
 BPE* init_bpe() {
     BPE* bpe = (BPE*)malloc(sizeof(BPE));
     bpe->vocab_size = 256;
@@ -22,38 +54,52 @@ void free_bpe(BPE* bpe) {
     free(bpe);
 }
 
-void train_bpe(BPE* bpe, const char* corpus, size_t corpus_size, uint32_t num_merges) {
+void train_bpe(BPE* bpe, const char* corpus, size_t corpus_size, uint32_t max_vocab_size) {
     printf("\n=== Training BPE ===\n");
     
-    // Initialize token sequence as bytes
-    uint32_t* tokens = (uint32_t*)malloc(corpus_size * sizeof(uint32_t));
-    uint32_t num_tokens = corpus_size;
+    // Initialize token sequence as bytes on host
+    uint32_t* h_tokens = (uint32_t*)malloc(corpus_size * sizeof(uint32_t));
     for (size_t i = 0; i < corpus_size; i++) {
-        tokens[i] = (unsigned char)corpus[i];
+        h_tokens[i] = (unsigned char)corpus[i];
     }
+    
+    // Allocate GPU memory
+    uint32_t* d_tokens;
+    uint32_t* d_pair_counts;
+    uint32_t num_merges = max_vocab_size - 256;
+    size_t counts_size = (size_t)max_vocab_size * max_vocab_size;
+    
+    CHECK_CUDA(cudaMalloc(&d_tokens, corpus_size * sizeof(uint32_t)));
+    CHECK_CUDA(cudaMalloc(&d_pair_counts, counts_size * sizeof(uint32_t)));
+    CHECK_CUDA(cudaMemcpy(d_tokens, h_tokens, corpus_size * sizeof(uint32_t), cudaMemcpyHostToDevice));
+    
+    uint32_t* h_pair_counts = (uint32_t*)malloc(counts_size * sizeof(uint32_t));
+    
+    int block_size = 256;
+    int num_blocks = (corpus_size + block_size - 1) / block_size;
     
     // Do num_merges iterations
     for (uint32_t merge_iter = 0; merge_iter < num_merges; merge_iter++) {
+        // Reset pair counts
+        CHECK_CUDA(cudaMemset(d_pair_counts, 0, counts_size * sizeof(uint32_t)));
+        
+        // Count pairs on GPU
+        count_pairs_kernel<<<num_blocks, block_size>>>(d_tokens, d_pair_counts, corpus_size, max_vocab_size);
+        CHECK_CUDA(cudaDeviceSynchronize());
+        
+        // Copy counts to host
+        CHECK_CUDA(cudaMemcpy(h_pair_counts, d_pair_counts, counts_size * sizeof(uint32_t), cudaMemcpyDeviceToHost));
+        
         // Find most frequent pair
         uint32_t best_t1 = 0, best_t2 = 0, best_count = 0;
-        
-        // Consider every adjacent pair
-        for (uint32_t i = 0; i < num_tokens - 1; i++) {
-            uint32_t t1 = tokens[i];
-            uint32_t t2 = tokens[i + 1];
-            
-            // Count this pair everywhere in the sequence
-            uint32_t count = 0;
-            for (uint32_t j = 0; j < num_tokens - 1; j++) {
-                if (tokens[j] == t1 && tokens[j + 1] == t2) {
-                    count++;
+        for (uint32_t t1 = 0; t1 < bpe->vocab_size; t1++) {
+            for (uint32_t t2 = 0; t2 < bpe->vocab_size; t2++) {
+                uint32_t count = h_pair_counts[t1 * max_vocab_size + t2];
+                if (count > best_count) {
+                    best_count = count;
+                    best_t1 = t1;
+                    best_t2 = t2;
                 }
-            }
-            
-            if (count > best_count) {
-                best_count = count;
-                best_t1 = t1;
-                best_t2 = t2;
             }
         }
         
@@ -71,22 +117,19 @@ void train_bpe(BPE* bpe, const char* corpus, size_t corpus_size, uint32_t num_me
         strcat(bpe->vocab[new_token], bpe->vocab[best_t2]);
         bpe->vocab_size++;
         
-        // Replace all occurrences in token sequence
-        uint32_t write_pos = 0;
-        for (uint32_t i = 0; i < num_tokens; i++) {
-            if (i < num_tokens - 1 && tokens[i] == best_t1 && tokens[i + 1] == best_t2) {
-                tokens[write_pos++] = new_token;
-                i++;  // Skip next token
-            } else {
-                tokens[write_pos++] = tokens[i];
-            }
-        }
-        num_tokens = write_pos;
+        // Replace all occurrences on GPU
+        replace_pair_kernel<<<num_blocks, block_size>>>(d_tokens, corpus_size, best_t1, best_t2, new_token);
+        CHECK_CUDA(cudaDeviceSynchronize());
         
-        printf("Merge %u: (%u, %u) -> %u | count: %u | tokens: %u\n", merge_iter + 1, best_t1, best_t2, new_token, best_count, num_tokens);
+        printf("Merge %u: (%u, %u) -> %u | count: %u\n", merge_iter + 1, best_t1, best_t2, new_token, best_count);
     }
     
-    free(tokens);
+    // Cleanup
+    free(h_tokens);
+    free(h_pair_counts);
+    CHECK_CUDA(cudaFree(d_tokens));
+    CHECK_CUDA(cudaFree(d_pair_counts));
+    
     printf("\nDone! Vocab size: %u\n", bpe->vocab_size);
 }
 
