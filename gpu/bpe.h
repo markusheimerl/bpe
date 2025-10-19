@@ -5,6 +5,19 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <cuda_runtime.h>
+
+// CUDA Error checking macro
+#ifndef CHECK_CUDA
+#define CHECK_CUDA(call) do { \
+    cudaError_t err = call; \
+    if (err != cudaSuccess) { \
+        fprintf(stderr, "CUDA error in %s:%d: %s\n", __FILE__, __LINE__, \
+                cudaGetErrorString(err)); \
+        exit(EXIT_FAILURE); \
+    } \
+} while(0)
+#endif
 
 typedef struct {
     char** vocab;
